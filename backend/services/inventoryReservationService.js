@@ -111,6 +111,9 @@ async function reserveStockInTransaction(conn, userId, productId, quantity, now,
 
     if (variant) {
         totalStock = safeNumber(variant.stock);
+        if(line.variantId <= NO_VARIANT_ID){
+            line.variantId = variant.id;
+        }
     }
 
     const [locks] = variant
