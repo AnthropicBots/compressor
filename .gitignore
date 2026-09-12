@@ -1,0 +1,14 @@
+# Go build output
+backend/bin/
+*.exe
+*.out
+
+# Archives produced by testing
+*.huff
+*.restored
+
+# OS/editor cruft
+.DS_Store
+*.swp
+.idea/
+.vscode/

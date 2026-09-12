@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>huffman-compressor — lossless, byte-safe, no black box</title>
+<meta name="description" content="Compress any file with Huffman, RLE, or auto-select. See the entropy, the tree, and the checksum that proves nothing was lost." />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect width=%22100%22 height=%22100%22 rx=%2216%22 fill=%22%23141310%22/><rect x=%2222%22 y=%2260%22 width=%2256%22 height=%2214%22 fill=%22%23D7FF3E%22/></svg>" />
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark" aria-hidden="true"></span>
+    <span class="brand-name">huffman-compressor</span>
+  </div>
+  <div class="topbar-right">
+    <span class="status-pill"><span class="status-dot"></span>engine ready · v2</span>
+    <button id="theme-toggle" class="chip-btn" title="Toggle light / dark" aria-label="Toggle theme">
+      <svg id="icon-sun" viewBox="0 0 24 24" width="15" height="15"><path fill="currentColor" d="M12 4.5a1 1 0 0 1-1-1V2a1 1 0 1 1 2 0v1.5a1 1 0 0 1-1 1Zm0 15a1 1 0 0 1 1 1V22a1 1 0 1 1-2 0v-1.5a1 1 0 0 1 1-1ZM4.5 12a1 1 0 0 1-1 1H2a1 1 0 1 1 0-2h1.5a1 1 0 0 1 1 1Zm18 0a1 1 0 0 1-1 1H20a1 1 0 1 1 0-2h1.5a1 1 0 0 1 1 1ZM6.34 7.76a1 1 0 0 1-1.41 0L3.87 6.7A1 1 0 1 1 5.28 5.3l1.06 1.05a1 1 0 0 1 0 1.41Zm12.73 12.73a1 1 0 0 1-1.41 0l-1.06-1.06a1 1 0 0 1 1.41-1.41l1.06 1.06a1 1 0 0 1 0 1.41ZM6.34 16.24a1 1 0 0 1 0 1.41L5.28 18.7A1 1 0 1 1 3.87 17.3l1.06-1.06a1 1 0 0 1 1.41 0Zm12.73-12.73a1 1 0 0 1 0 1.41l-1.06 1.06a1 1 0 1 1-1.41-1.41l1.06-1.06a1 1 0 0 1 1.41 0ZM12 7.5a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9Z"/></svg>
+      <svg id="icon-moon" viewBox="0 0 24 24" width="15" height="15" style="display:none"><path fill="currentColor" d="M20.742 13.045a8.088 8.088 0 0 1-2.077.271c-4.539 0-8.221-3.68-8.221-8.221 0-1.194.271-2.327.75-3.34a.75.75 0 0 0-.917-1.02A10.318 10.318 0 0 0 1.75 11.318C1.75 17.11 6.44 21.8 12.232 21.8c4.6 0 8.51-2.98 9.892-7.113a.75.75 0 0 0-1.382-.642Z"/></svg>
+    </button>
+    <a class="chip-btn" href="https://github.com" target="_blank" rel="noopener">★ source</a>
+  </div>
+</header>
+
+<main class="page">
+
+  <section class="hero">
+    <div class="eyebrow"><span class="eyebrow-swatch"></span>LOSSLESS &middot; VERIFIED &middot; NO DEPENDENCIES</div>
+    <h1 class="hero-title">Shrink your files.<br /><span class="hl">Keep every byte.</span></h1>
+    <p class="hero-sub">Three compression algorithms race on your file and the smallest one wins. See the entropy, the byte histogram, and the actual Huffman tree that did the work — then verify nothing was lost with a CRC-32 checksum.</p>
+  </section>
+
+  <section class="app-shell">
+
+    <!-- ============ LEFT: controls ============ -->
+    <div class="panel panel-controls">
+
+      <div class="tabstrip" role="tablist" aria-label="Mode">
+        <button class="tab-btn active" data-mode="auto" role="tab" aria-selected="true">auto</button>
+        <button class="tab-btn" data-mode="compress" role="tab" aria-selected="false">compress</button>
+        <button class="tab-btn" data-mode="decompress" role="tab" aria-selected="false">decompress</button>
+      </div>
+
+      <div class="panel-body">
+        <p class="mode-hint" id="mode-hint">Drop any file — the engine picks the smallest result automatically. Drop a <code>.huff</code> file and it restores instead.</p>
+
+        <div class="field-row" id="algo-row">
+          <label for="algo-select">algorithm</label>
+          <select id="algo-select" class="algo-select">
+            <option value="auto">auto — smallest wins</option>
+            <option value="huffman">canonical huffman</option>
+            <option value="rle">run-length (packbits)</option>
+            <option value="store">store — no compression</option>
+          </select>
+        </div>
+
+        <div id="dropzone" class="dropzone" tabindex="0" role="button" aria-label="Upload file">
+          <input type="file" id="file-input" multiple hidden />
+          <div class="dropzone-inner">
+            <span class="drop-glyph">＋</span>
+            <p class="drop-title">drag a file here, or click to browse</p>
+            <p class="drop-sub">any file type &middot; up to 64&nbsp;MB &middot; multiple at once</p>
+          </div>
+        </div>
+
+        <div id="queue-card" class="subpanel" hidden>
+          <div class="subpanel-label">queue</div>
+          <ul id="queue-list" class="queue-list"></ul>
+        </div>
+
+        <div id="history-card" class="subpanel">
+          <div class="subpanel-label-row">
+            <span class="subpanel-label">history</span>
+            <button id="clear-history" class="text-btn">clear</button>
+          </div>
+          <ul id="history-list" class="history-list">
+            <li class="empty-state">nothing run yet this session</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ RIGHT: output ============ -->
+    <div class="panel panel-output">
+
+      <div id="empty-panel" class="empty-panel">
+        <span class="empty-glyph">◧</span>
+        <h2>waiting on a file</h2>
+        <p>Upload something and this space fills with live stats: compression ratio, Shannon entropy, a head-to-head of all three algorithms, the byte-frequency histogram, and an interactive Huffman tree.</p>
+        <ul class="feature-list">
+          <li><span class="fl-mark"></span>every archive carries a CRC-32, checked on decompress</li>
+          <li><span class="fl-mark"></span>auto mode tries all three algorithms, keeps the smallest</li>
+          <li><span class="fl-mark"></span>works on any byte, not just text — binaries included</li>
+          <li><span class="fl-mark"></span>single Go binary, zero external dependencies</li>
+        </ul>
+      </div>
+
+      <div id="result-panel" class="result-panel" hidden>
+
+        <div class="result-header">
+          <div>
+            <h2 id="result-filename" class="result-filename">filename.ext</h2>
+            <p id="result-subtitle" class="result-subtitle">compressed successfully</p>
+          </div>
+          <button id="download-btn" class="btn-primary">↓ download</button>
+        </div>
+
+        <div class="stat-grid">
+          <div class="stat-cell"><span class="stat-label">original</span><span class="stat-value" id="stat-original">—</span></div>
+          <div class="stat-cell accent"><span class="stat-label">compressed</span><span class="stat-value" id="stat-compressed">—</span></div>
+          <div class="stat-cell"><span class="stat-label">saved</span><span class="stat-value" id="stat-saved">—</span></div>
+          <div class="stat-cell"><span class="stat-label">algorithm</span><span class="stat-value sm" id="stat-algo">—</span></div>
+          <div class="stat-cell"><span class="stat-label">entropy</span><span class="stat-value sm" id="stat-entropy">—</span></div>
+          <div class="stat-cell"><span class="stat-label">efficiency</span><span class="stat-value sm" id="stat-efficiency">—</span></div>
+          <div class="stat-cell"><span class="stat-label">time</span><span class="stat-value sm" id="stat-time">—</span></div>
+          <div class="stat-cell"><span class="stat-label">crc-32</span><span class="stat-value mono" id="stat-checksum">—</span></div>
+        </div>
+
+        <div class="notice-box" id="checksum-warning" hidden>
+          checksum mismatch — the restored data may not exactly match the original file.
+        </div>
+
+        <div class="block" id="bars-card">
+          <div class="block-label">size comparison</div>
+          <div class="bar-row">
+            <span class="bar-label">original</span>
+            <div class="bar-track"><div id="bar-original" class="bar-fill bar-original"></div></div>
+            <span class="bar-value" id="bar-original-value">0 B</span>
+          </div>
+          <div class="bar-row">
+            <span class="bar-label">compressed</span>
+            <div class="bar-track"><div id="bar-compressed" class="bar-fill bar-compressed"></div></div>
+            <span class="bar-value" id="bar-compressed-value">0 B</span>
+          </div>
+          <div class="bar-row">
+            <span class="bar-label" title="Shannon entropy lower bound">theoretical</span>
+            <div class="bar-track"><div id="bar-theoretical" class="bar-fill bar-theoretical"></div></div>
+            <span class="bar-value" id="bar-theoretical-value">0 B</span>
+          </div>
+        </div>
+
+        <div class="block" id="algo-compare-card">
+          <div class="block-label">algorithm showdown</div>
+          <div id="algo-compare"></div>
+        </div>
+
+        <div class="block" id="tree-card">
+          <div class="block-label-row">
+            <span class="block-label">huffman tree</span>
+            <span class="tree-hint" id="tree-hint"></span>
+          </div>
+          <div class="tree-wrap"><div id="tree-svg-holder"></div></div>
+        </div>
+
+        <div class="block" id="hist-card">
+          <div class="block-label">byte frequency</div>
+          <div id="histogram" class="histogram"></div>
+        </div>
+
+        <div class="block" id="codes-card">
+          <div class="block-label-row">
+            <span class="block-label">huffman code table</span>
+            <button id="copy-codes" class="text-btn">copy as json</button>
+          </div>
+          <div class="table-wrap">
+            <table class="codes-table">
+              <thead><tr><th>symbol</th><th>freq</th><th>%</th><th>code</th><th>bits</th></tr></thead>
+              <tbody id="codes-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+  </section>
+
+</main>
+
+<footer class="footer">
+  <p>dependency-free go backend &amp; vanilla-js frontend &middot; canonical huffman + rle + store, bit-packed, byte-safe for any file type</p>
+</footer>
+
+<div id="toast-container" class="toast-container" aria-live="polite"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
