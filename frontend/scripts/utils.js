@@ -1688,6 +1688,31 @@ const pushCartToBackend = async (cart) => {
     }
 
     if (response && response.success) {
+        // The server drops lines whose product has been withdrawn from sale
+        // and names them (#1546). Keeping a line the server refused would
+        // resurrect it on the next sync and carry it all the way to checkout,
+        // so the acknowledged basket is what the server actually stored.
+        const droppedIds = safeArray(response.droppedProductIds)
+            .map((id) => String(id));
+
+        if (droppedIds.length) {
+            const kept = safeArray(cart).filter(
+                (item) => !droppedIds.includes(String(item.id))
+            );
+
+            notify(
+                droppedIds.length === 1
+                    ? "An item in your cart is no longer available and has been removed."
+                    : `${droppedIds.length} items in your cart are no longer available and have been removed.`,
+                "warning"
+            );
+
+            serverAcknowledgedItems = kept;
+            saveCart(kept, { sync: false });
+
+            return true;
+        }
+
         serverAcknowledgedItems = cart;
         return true;
     }
@@ -1770,6 +1795,21 @@ const fetchServerCart = async () => {
         const data = await apiRequest("/cart", {}, false);
 
         if (data && data.success) {
+            // Lines whose product has since been withdrawn are not returned
+            // (#1546). The count of them is, so a basket that comes back
+            // shorter than the shopper left it can say why instead of looking
+            // like the cart lost their items.
+            const unavailableCount = Number(data.unavailableCount) || 0;
+
+            if (unavailableCount > 0) {
+                notify(
+                    unavailableCount === 1
+                        ? "An item in your cart is no longer available and has been removed."
+                        : `${unavailableCount} items in your cart are no longer available and have been removed.`,
+                    "warning"
+                );
+            }
+
             return safeArray(data.cart)
                 .map(normalizeCartItem)
                 .filter(Boolean);
@@ -1885,7 +1925,7 @@ const getCartCount = (
 
 // Coupon validation is server-authoritative: the browser no longer knows which
 // codes exist or what they're worth. It POSTs the code + current cart total to
-// /promo/validate and maps the response onto the legacy { valid, code, percent,
+// /promos/validate and maps the response onto the legacy { valid, code, percent,
 // message } shape callers already understand. Any failure (network, timeout,
 // unknown code, rate limit) resolves to a safe invalid result rather than
 // throwing, so a broken promo endpoint never blocks checkout.
@@ -1907,7 +1947,11 @@ const validateCoupon = async (
     const safeCartTotal = safeNumber(cartTotal, 0);
 
     try {
-        const response = await apiRequest("/promo/validate", {
+        // "/promos", plural: routes/index.js has always mounted the promo
+        // router there, and the singular spelling here meant every coupon
+        // anyone entered was answered by a 404 and reported as an invalid code
+        // (#1445). CONFIG.API_BASE already ends in /api.
+        const response = await apiRequest("/promos/validate", {
             method: "POST",
             body: JSON.stringify({
                 promoCode: normalizedCode,
