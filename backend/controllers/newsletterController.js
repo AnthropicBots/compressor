@@ -1,0 +1,165 @@
+// backend/controllers/newsletterController.js
+//
+// The HTTP surface for the newsletter list (#1459).
+//
+// The interesting decision here is that `subscribe` answers the same way
+// whatever happens. See the constant below.
+
+'use strict';
+
+const newsletterService = require('../services/newsletterService');
+const logger = require('../config/logger');
+
+/**
+ * The one thing POST /subscribe says.
+ *
+ * A new address, an address already pending, an address already confirmed and a
+ * malformed address all get this. Anything else and the form is a membership
+ * oracle: "you are already subscribed" tells an anonymous caller that a
+ * particular person is on this list, which is a fact about that person and not
+ * about the caller. Same reasoning as /forgot-password in #1455.
+ *
+ * The copy is honest about the confirmation step, which is what the old
+ * frontend was not -- it said "Thanks for subscribing!" over a request it had
+ * never made.
+ */
+const SUBSCRIBE_RESPONSE = Object.freeze({
+    success: true,
+    message:
+        'Almost there — check your email for a link to confirm your subscription.'
+});
+
+/**
+ * POST /api/newsletter/subscribe
+ */
+const subscribe = async (req, res) => {
+    const respond = () => res.status(200).json(SUBSCRIBE_RESPONSE);
+
+    try {
+        const { email, source } = req.body || {};
+
+        const result = await newsletterService.subscribe({
+            email,
+            // Which page the form was on, for the consent record. Caller-supplied
+            // and therefore capped and not trusted for anything but the record.
+            sourcePage: typeof source === 'string' ? source.slice(0, 255) : null,
+            ip: req.ip || null,
+            userId: req.user?.id || null
+        });
+
+        // Logged, not returned. The outcome is the part that would leak.
+        logger.info(`Newsletter subscribe: ${result.outcome}`);
+
+        return respond();
+    } catch (error) {
+        // Even a failure answers the same way. A 500 for a real address and a
+        // 200 for a malformed one is the oracle again, in a slower form.
+        logger.error(`Newsletter subscribe failed: ${error.message}`);
+        return respond();
+    }
+};
+
+/**
+ * POST /api/newsletter/confirm
+ *
+ * Unlike subscribe, this one does report what happened, and can: the caller is
+ * holding a token that was mailed to the address, so they have already
+ * demonstrated they are the person entitled to know.
+ */
+const confirm = async (req, res) => {
+    try {
+        const token = req.body?.token || req.query?.token;
+        const result = await newsletterService.confirm(token);
+        const { CONFIRM_OUTCOMES } = newsletterService;
+
+        // A link that has already done its job is not an error. Clicking twice
+        // is ordinary, and a mail security scanner following the link before
+        // the recipient sees it makes the *first* human click the second one
+        // (#1612).
+        if (result.outcome === CONFIRM_OUTCOMES.ALREADY_CONFIRMED) {
+            return res.status(200).json({
+                success: true,
+                message: "You're already subscribed — nothing more to do."
+            });
+        }
+
+        if (result.confirmed) {
+            return res.status(200).json({
+                success: true,
+                message: "You're subscribed. Thanks for signing up."
+            });
+        }
+
+        // The address asked not to be mailed. Silently re-adding it on the
+        // strength of an old link in an inbox would undo that request, so the
+        // only honest answer is to send them back to the form, where the
+        // double opt-in will ask them again.
+        if (result.outcome === CONFIRM_OUTCOMES.ALREADY_UNSUBSCRIBED) {
+            return res.status(409).json({
+                success: false,
+                message:
+                    'This address has unsubscribed. Sign up again if you would '
+                    + 'like to start receiving the newsletter.'
+            });
+        }
+
+        if (result.outcome === CONFIRM_OUTCOMES.EXPIRED) {
+            return res.status(410).json({
+                success: false,
+                message:
+                    'That confirmation link has expired. '
+                    + 'Sign up again to get a new one.'
+            });
+        }
+
+        return res.status(400).json({
+            success: false,
+            message: 'That confirmation link is not valid.'
+        });
+    } catch (error) {
+        logger.error(`Newsletter confirm failed: ${error.message}`);
+        return res.status(500).json({
+            success: false,
+            message: 'Could not confirm the subscription. Please try again.'
+        });
+    }
+};
+
+/**
+ * POST /api/newsletter/unsubscribe
+ *
+ * Succeeds when clicked twice. An unsubscribe link that errors the second time
+ * reads as "that did not work", and the reasonable response to that is to click
+ * it again -- or to mark the next mailing as spam.
+ */
+const unsubscribe = async (req, res) => {
+    try {
+        const token = req.body?.token || req.query?.token;
+        const result = await newsletterService.unsubscribe(token);
+
+        if (!result.unsubscribed) {
+            return res.status(400).json({
+                success: false,
+                message: 'That unsubscribe link is not valid.'
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: 'You have been unsubscribed. We will not email you again.'
+        });
+    } catch (error) {
+        logger.error(`Newsletter unsubscribe failed: ${error.message}`);
+        return res.status(500).json({
+            success: false,
+            message: 'Could not unsubscribe. Please try again.'
+        });
+    }
+};
+
+module.exports = {
+    subscribe,
+    confirm,
+    unsubscribe,
+    SUBSCRIBE_RESPONSE
+};

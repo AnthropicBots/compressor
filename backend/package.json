@@ -2,10 +2,10 @@
   "name": "backend",
   "version": "1.0.0",
   "description": "",
-  "main": "server.js",
+  "main": "index.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "nodemon server.js",
+    "start": "node index.js",
+    "dev": "nodemon index.js",
     "migrate": "node scripts/migrate.js",
     "migrate:status": "node scripts/migrate.js --status",
     "migrate:baseline": "node scripts/migrate.js --baseline",
@@ -80,6 +80,7 @@
     "babel-jest": "^30.4.1",
     "chai": "^6.2.2",
     "jest": "^29.7.0",
+    "jsdom": "^20.0.3",
     "nodemon": "^3.1.14",
     "sinon": "^22.1.0",
     "supertest": "^7.2.2"
