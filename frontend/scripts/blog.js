@@ -27,8 +27,8 @@ const categoryButtons = document.querySelectorAll(".category-btn");
 const blogModal = document.getElementById("blog-modal");
 const blogModalClose = document.getElementById("blog-modal-close");
 const blogModalBody = document.getElementById("blog-modal-body");
-const newsletterBtn = document.getElementById("newsletter-btn");
-const newsletterEmail = document.getElementById("newsletter-email");
+// The two newsletter lookups that were here are gone along with the handler
+// that read them (#1459).
 
 
 function renderBlogPosts() {
@@ -231,10 +231,11 @@ function openArticleModal(id) {
             ALLOW_DATA_ATTR: false
         });
     } else {
-        // Safe DOM construction fallback without raw innerHTML assignment to prevent XSS
+        // Safe DOM construction fallback with HTML tag stripping and textContent assignment to prevent XSS
         textDiv.textContent = "";
         const rawText = String(post.content || "");
-        const paragraphs = rawText.split(/\n\n+/);
+        const sanitizedText = rawText.replace(/<[^>]*>/g, '');
+        const paragraphs = sanitizedText.split(/\n\n+/);
         paragraphs.forEach((para) => {
             if (para.trim()) {
                 const p = document.createElement("p");
@@ -382,38 +383,10 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     });
 
-    // Newsletter submit handler
-    if (newsletterBtn && newsletterEmail) {
-        newsletterBtn.addEventListener("click", (e) => {
-            e.preventDefault();
-            const email = newsletterEmail.value.trim();
-            if (!email) {
-                if (window.showToast) {
-                    window.showToast("Please enter a valid email address.", "warning");
-                } else {
-                    alert("Please enter a valid email address.");
-                }
-                return;
-            }
-            
-            // Email regex validation
-            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-            if (!emailRegex.test(email)) {
-                if (window.showToast) {
-                    window.showToast("Please enter a valid email address format.", "error");
-                } else {
-                    alert("Please enter a valid email address format.");
-                }
-                return;
-            }
-
-            // Success feedback
-            if (window.showToast) {
-                window.showToast("Thank you! You have successfully subscribed to our newsletter.", "success");
-            } else {
-                alert("Thank you! You have successfully subscribed to our newsletter.");
-            }
-            newsletterEmail.value = "";
-        });
-    }
+    // The newsletter click handler lived here. It validated the address, gave
+    // a success toast and made no request at all -- and because it bound
+    // `click` on a submit button and called preventDefault, it also cancelled
+    // the form submit, so which of the two handlers on this page fired came
+    // down to whether the visitor clicked or pressed Enter. The single real
+    // handler is initNewsletterForms() in script.js (#1459).
 });
