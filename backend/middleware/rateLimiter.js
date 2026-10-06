@@ -56,6 +56,31 @@ const GUEST_ORDER_LOOKUP_MAX =
     parseInt(process.env.RATE_LIMIT_GUEST_ORDER_LOOKUP_MAX, 10)
     || 10;
 
+// Five messages a quarter of an hour. Nobody with something to say needs a
+// sixth; anybody filling the table does.
+const CONTACT_FORM_MAX =
+    parseInt(process.env.RATE_LIMIT_CONTACT_FORM_MAX, 10)
+    || 5;
+
+const NEWSLETTER_MAX =
+    parseInt(process.env.RATE_LIMIT_NEWSLETTER_MAX, 10)
+    || 10;
+
+const NEWSLETTER_WINDOW_MS =
+    parseInt(process.env.RATE_LIMIT_NEWSLETTER_WINDOW_MS, 10)
+    || 60 * 60 * 1000; // 1 hour
+
+// Twenty pincode checks a minute. That is the budget the hand-rolled Map in
+// pincodeController carried (#1496) and there is no reason to change the
+// number while moving where it is counted.
+const PINCODE_LOOKUP_MAX =
+    parseInt(process.env.RATE_LIMIT_PINCODE_MAX, 10)
+    || 20;
+
+const PINCODE_WINDOW_MS =
+    parseInt(process.env.RATE_LIMIT_PINCODE_WINDOW_MS, 10)
+    || 60 * 1000; // 1 minute
+
 // ==================== CUSTOM KEY GENERATOR ====================
 // A limit is only as good as the identity it counts against, so the identity is
 // picked deliberately here.
@@ -219,6 +244,27 @@ const otpRequestLimiter = createLimiter({
     logPrefix: "OTP request rate limit exceeded"
 });
 
+// ==================== NEWSLETTER LIMITER ====================
+// Unauthenticated, public, and it causes mail to be sent to an address the
+// caller names -- so it is usable to mail-bomb somebody else, or to burn the
+// sending domain's reputation on volume nobody asked for (#1459).
+//
+// The service already refuses to re-send to an address that is confirmed, which
+// caps what any one victim can be made to receive. This bounds the other axis:
+// how many distinct addresses a single caller can involve.
+//
+// More generous than the credential limiters, because the failure modes are not
+// comparable. Someone signing up from a shared office connection minutes after
+// a colleague did the same is an ordinary thing to happen, and turning them
+// away for a quarter of an hour costs more than the abuse it prevents.
+const newsletterLimiter = createLimiter({
+    name: "newsletter",
+    windowMs: NEWSLETTER_WINDOW_MS,
+    max: NEWSLETTER_MAX,
+    message: `Too many newsletter requests. Please try again after ${NEWSLETTER_WINDOW_MS / 60000} minutes.`,
+    logPrefix: "Newsletter rate limit exceeded"
+});
+
 // ==================== GUEST ORDER LOOKUP LIMITER ====================
 // Not an auth endpoint, but the same abuse: an unauthenticated caller
 // submitting a credential pair and being told whether it was right. Left with
@@ -234,6 +280,41 @@ const guestOrderLookupLimiter = createLimiter({
     max: GUEST_ORDER_LOOKUP_MAX,
     message: `Too many order lookups. Please try again after ${DEFAULT_WINDOW_MS / 60000} minutes.`,
     logPrefix: "Guest order lookup rate limit exceeded"
+});
+
+// ==================== CONTACT FORM LIMITER ====================
+//
+// Unauthenticated, and it writes a row per request. Its own namespace so it
+// neither eats nor is eaten by the credential limiters -- someone who has just
+// failed a login is exactly the person about to use the contact form.
+const contactFormLimiter = createLimiter({
+    name: "contact-form",
+    windowMs: DEFAULT_WINDOW_MS,
+    max: CONTACT_FORM_MAX,
+    message: `Too many messages sent. Please try again after ${DEFAULT_WINDOW_MS / 60000} minutes.`,
+    logPrefix: "Contact form rate limit exceeded"
+});
+
+// ==================== PINCODE LOOKUP LIMITER ====================
+//
+// pincodeController used to count these itself, in a module-level `Map` that
+// inserted one entry per client address and never removed one (#1496). Entries
+// were pruned within a key on the next request from that key, but a key
+// visited once stayed for the lifetime of the process -- an unbounded map,
+// keyed by attacker-supplied source addresses, on an endpoint reachable from
+// the open internet and behind no authentication.
+//
+// Counting it here instead also fixes two things the hand-rolled version got
+// wrong for free: the counters are shared across instances rather than
+// per-process, and the key comes from `customKeyGenerator`, which respects the
+// explicitly configured `trust proxy` instead of reading `req.connection
+// .remoteAddress` (deprecated since Node 13) behind a load balancer.
+const pincodeLookupLimiter = createLimiter({
+    name: "pincode-lookup",
+    windowMs: PINCODE_WINDOW_MS,
+    max: PINCODE_LOOKUP_MAX,
+    message: "Too many pincode checks. Please try again in a minute.",
+    logPrefix: "Pincode lookup rate limit exceeded"
 });
 
 // ==================== SUSPICIOUS IP RATE LIMITER ====================
@@ -267,7 +348,10 @@ module.exports = {
     otpVerifyLimiter,
     resetPasswordLimiter,
     otpRequestLimiter,
+    newsletterLimiter,
     guestOrderLookupLimiter,
+    contactFormLimiter,
+    pincodeLookupLimiter,
     suspiciousIpLimiter,
     customKeyGenerator,
     onLimitReached
